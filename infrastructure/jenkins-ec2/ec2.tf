@@ -1,0 +1,17 @@
+resource "aws_instance" "ec2" {
+  ami                    = data.aws_ami.ami.image_id
+  instance_type          = "t2.medium"
+  key_name               = var.key-name
+  subnet_id              = aws_subnet.public-subnet.id
+  vpc_security_group_ids = [aws_security_group.security-group.id]
+
+  root_block_device {
+    volume_size = 30
+  }
+
+  user_data = replace(templatefile("./tools-install.sh", {}), "\r", "")
+
+  tags = {
+    Name = var.instance-name
+  }
+}
