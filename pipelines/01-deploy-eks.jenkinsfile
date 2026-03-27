@@ -1,0 +1,32 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Select Terraform Action')
+    }
+    
+    environment {
+        AWS_CRED_ID = 'aws-key'            
+        TF_DIR      = 'infrastructure/jenkins-ec2'
+        GIT_URL     = 'https://github.com/tanatworks/Geemu.git'
+    }
+
+    stages {
+        stage('1. Checkout Code') {
+            steps {
+                git branch: 'main', url: "${GIT_URL}"
+            }
+        }
+        
+        stage('2. Execute Terraform') {
+            steps {
+                withAWS(credentials: "${AWS_CRED_ID}", region: 'us-east-1') {
+                    dir("${TF_DIR}") {
+                        sh 'terraform init'
+                        sh "terraform ${params.ACTION} -auto-approve"
+                    }
+                }
+            }
+        }
+    }
+}
