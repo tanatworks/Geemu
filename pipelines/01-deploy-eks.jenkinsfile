@@ -37,6 +37,9 @@ pipeline {
         }
 
         stage('3. Configure Kubeconfig') {
+            when { 
+                expression { params.ACTION == 'apply' } 
+            }
             steps {
                 script {
                     sh "aws eks update-kubeconfig --region us-east-1 --name Geemu-EKS-Cluster"
