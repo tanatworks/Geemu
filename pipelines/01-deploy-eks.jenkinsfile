@@ -6,12 +6,10 @@ pipeline {
     }
     
     environment {
-        // ใช้กุญแจ 3 ดอกที่เราเพิ่งตั้งค่าไว้ใน Jenkins (แก้ Error 401)
         AWS_ACCESS_KEY_ID     = credentials('aws-access-key')
         AWS_SECRET_ACCESS_KEY = credentials('aws-secret-key')
         AWS_SESSION_TOKEN     = credentials('aws-session-token')
         
-        // ชี้เป้าหมายไปที่โฟลเดอร์ EKS ที่เราเพิ่งแก้ไฟล์เสร็จ
         TF_DIR  = 'infrastructure/eks-cluster' 
         GIT_URL = 'https://github.com/tanatworks/Geemu.git'
     }
@@ -19,7 +17,6 @@ pipeline {
     stages {
         stage('1. Checkout Code') {
             steps {
-                // ดึงโค้ดจาก branch develop
                 git branch: 'develop', url: "${GIT_URL}"
             }
         }
@@ -35,6 +32,15 @@ pipeline {
                             sh "terraform ${params.ACTION} -auto-approve"
                         }
                     }
+                }
+            }
+        }
+
+        stage('3. Configure Kubeconfig') {
+            steps {
+                script {
+                    sh "aws eks update-kubeconfig --region us-east-1 --name Geemu-EKS-Cluster"
+                    sh "kubectl get nodes"
                 }
             }
         }
