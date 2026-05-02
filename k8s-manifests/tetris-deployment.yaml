@@ -16,7 +16,7 @@ spec:
         spec:
             containers:
                 - name: tetris
-                  image: avian19/tetrisv1:latest
+                  image: tanattanat/geemu-app:6
                   ports:
                       - containerPort: 3000
 ---
