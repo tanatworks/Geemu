@@ -47,6 +47,7 @@ pipeline {
                 }
             }
         }
+        
         stage('4. Install ArgoCD (Step 6)') {
             when { 
                 expression { params.ACTION == 'apply' } 
@@ -56,11 +57,15 @@ pipeline {
                     sh "kubectl create namespace tetris || true"
                     sh "kubectl create namespace argocd || true"
                     
-                    sh "kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.4.7/manifests/install.yaml"
+                    sh "kubectl delete svc argocd-server -n argocd --ignore-not-found=true"
                     
+                    sh "kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.4.7/manifests/install.yaml"
                     sh "kubectl patch svc argocd-server -n argocd -p '{\"spec\": {\"type\": \"LoadBalancer\"}}'"
              
-                    sleep time: 30, unit: 'SECONDS'
+                    sh "kubectl rollout restart deployment -n argocd"
+                    sh "kubectl rollout restart statefulset -n argocd"
+
+                    sleep time: 45, unit: 'SECONDS'
                     
                     sh "echo '=== ARGOCD URL ==='"
                     sh "kubectl get svc argocd-server -n argocd -o wide"
