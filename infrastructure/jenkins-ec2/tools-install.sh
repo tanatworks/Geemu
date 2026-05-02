@@ -14,6 +14,20 @@ echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.
 sudo apt update
 sudo apt install jenkins -y
 
+# 2.1 Optimization: Set Java Heap Size and Swap
+# Create 4GB Swap
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# Set Jenkins Heap Size to 3GB
+sudo mkdir -p /etc/systemd/system/jenkins.service.d/
+echo -e "[Service]\nEnvironment=\"JAVA_OPTS=-Xmx3g -Xms1g -Djava.awt.headless=true\"" | sudo tee /etc/systemd/system/jenkins.service.d/override.conf
+sudo systemctl daemon-reload
+sudo systemctl restart jenkins
+
 # 3. Installing Docker
 sudo apt install docker.io -y
 sudo usermod -aG docker jenkins
