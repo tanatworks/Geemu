@@ -7,7 +7,7 @@ pipeline {
         GITHUB_CRED_ID  = 'github'             
         SONAR_CRED_ID   = 'sonar-token'        
         
-        DOCKER_USER     = 'avian19'         
+        DOCKER_USER     = 'tanattanat'         
         DOCKER_IMAGE    = 'tetris-v2'          
         
         GIT_URL         = 'https://github.com/tanatworks/Geemu.git'
@@ -21,6 +21,7 @@ pipeline {
         
         SCANNER_HOME    = tool 'sonar-scanner' 
     }
+    
 
     tools {
         nodejs 'nodejs' 
