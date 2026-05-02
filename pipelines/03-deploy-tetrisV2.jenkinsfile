@@ -1,147 +1,146 @@
 pipeline {
     agent any
-
-    tools {
-        nodejs 'nodejs'
+    
+    environment {
+        // ส่วนนี้คือค่าของโปรเจกต์สำหรับ V2
+        DOCKER_CRED_ID  = 'docker'             
+        GITHUB_CRED_ID  = 'github'             
+        SONAR_CRED_ID   = 'sonar-token'        
+        
+        DOCKER_USER     = 'avian19'         
+        DOCKER_IMAGE    = 'tetris-v2'          
+        
+        GIT_URL         = 'https://github.com/tanatworks/Geemu.git'
+        GIT_BRANCH      = 'develop'
+        GIT_REPO_NAME   = 'Geemu'
+        GIT_USER_NAME   = 'tanatworks'
+        
+        APP_DIR         = 'Tetris-V2'         
+        MANIFEST_DIR    = 'k8s-manifests' 
+        MANIFEST_FILE   = 'tetris-deployment.yaml'
+        
+        SCANNER_HOME    = tool 'sonar-scanner' 
     }
 
-    environment {
-        // [!] Credential IDs (ให้ตรงกับที่ตั้งไว้ใน Jenkins)
-        DOCKER_CRED_ID  = 'docker'
-        GITHUB_CRED_ID  = 'github'
-        SONAR_CRED_ID   = 'sonar-token'
-        NVD_API_KEY_ID  = 'nvd-api-key'
-
-        // ข้อมูล Docker Hub
-        DOCKER_HUB_USER = 'avian19'           
-        APP_NAME        = 'tetris-v2'
-        DOCKER_IMAGE    = "${DOCKER_HUB_USER}/${APP_NAME}"
-
-        // ข้อมูล GitHub
-        GIT_USER_NAME   = "tanatworks"        
-        GIT_REPO_NAME   = "Geemu"             
-        GIT_BRANCH      = "develop"
-        GIT_URL         = "https://github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git"
-
-        // ข้อมูล Kubernetes Manifest
-        MANIFEST_DIR    = 'k8s-manifests'
-        MANIFEST_FILE   = 'tetris-deployment.yaml'
-
-        SCANNER_HOME    = tool 'sonar-scanner'
+    tools {
+        nodejs 'nodejs' 
     }
 
     stages {
-        stage('1. Cleaning & Checkout') {
+        stage('Cleaning Workspace') {
             steps {
                 cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
                 git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
             }
         }
 
-        stage('2. Sonarqube Analysis') {
+        stage('Sonarqube Analysis') {
             steps {
-                dir('Tetris-V2') {
-                    script {
-                        withSonarQubeEnv('sonar-server') {
-                            sh "${SCANNER_HOME}/bin/sonar-scanner \
-                                -Dsonar.projectName='Tetris V2' \
-                                -Dsonar.projectKey='Tetris-V2'"
-                        }
+                dir("${APP_DIR}") {
+                    withSonarQubeEnv('sonar-server') {
+                        sh """ $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Tetris-V2 \
+                        -Dsonar.projectKey=tetris-v2 """
                     }
                 }
             }
         }
 
-        stage('3. Quality Gate') {
+        stage('Quality Check') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    // ปรับเป็น abortPipeline: false หากต้องการให้รันต่อแม้ไม่ผ่าน (เหมือน V1)
-                    waitForQualityGate abortPipeline: true, credentialsId: "${SONAR_CRED_ID}"
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: "${SONAR_CRED_ID}"
                 }
             }
         }
 
-        stage('4. Installing Dependencies') {
+        stage('Installing Dependencies') {
             steps {
-                dir('Tetris-V2') {
+                dir("${APP_DIR}") {
                     sh 'npm install'
                 }
             }
         }
 
-        stage('5. Security Scans') {
-            parallel {
-                stage('Dependency Check') {
-                    steps {
-                        dir('Tetris-V2') {
-                            // เพิ่มการใช้ NVD API Key เหมือนใน V1 เพื่อให้การสแกนรวดเร็วและแม่นยำขึ้น
-                            withCredentials([string(credentialsId: "${NVD_API_KEY_ID}", variable: 'NVD_API_KEY')]) {
-                                dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey ${NVD_API_KEY}", odcInstallation: 'DP-Check'
-                            }
-                            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-                        }
+       stage('OWASP Dependency-Check Scan') {
+            steps {
+                dir("${APP_DIR}") {
+                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                        dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey ${NVD_API_KEY}", odcInstallation: 'DP-Check'
                     }
-                }
-                stage('Trivy File Scan') {
-                    steps {
-                        dir('Tetris-V2') {
-                            sh 'trivy fs . > trivyfs.txt'
-                        }
-                    }
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
                 }
             }
         }
 
-        stage('6. Docker Build & Scan') {
+        stage('Trivy File Scan') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'trivy fs . > trivyfs.txt'
+                }
+            }
+        }
+
+        stage("Docker Image Build") {
             steps {
                 script {
-                    dir('Tetris-V2') {
+                    dir("${APP_DIR}") {
                         withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
-                            // Clean space ก่อน Build เหมือน V1
                             sh 'docker system prune -f'
-
-                            sh "docker build -t ${APP_NAME} ."
-
-                            // Scan Image
-                            sh "trivy image ${APP_NAME} > trivyimage.txt"
-
-                            // Tag & Push
-                            sh "docker tag ${APP_NAME} ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                            sh "docker tag ${APP_NAME} ${DOCKER_IMAGE}:latest"
-                            sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                            sh "docker push ${DOCKER_IMAGE}:latest"
+                            sh "docker build -t ${DOCKER_IMAGE} ."
                         }
                     }
                 }
             }
         }
 
-        stage('7. GitOps: Update Manifest') {
+        stage("Docker Image Pushing") {
             steps {
                 script {
-                    dir("${MANIFEST_DIR}") {
-                        withCredentials([string(credentialsId: "${GITHUB_CRED_ID}", variable: 'GITHUB_TOKEN')]) {
-                            sh """
-                                git config user.email "jenkins@geemu.com"
-                                git config user.name "Jenkins-Bot"
-
-                                # ปรับ sed ให้หาคำว่า image: แล้วเปลี่ยนค่าทั้งหมดเพื่อให้ยืดหยุ่นต่อการเปลี่ยนชื่อ image
-                                sed -i "s|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" ${MANIFEST_FILE}
-
-                                git add ${MANIFEST_FILE}
-                                git commit -m "chore: update Tetris V2 image to version ${BUILD_NUMBER} [skip ci]"
-                                git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git HEAD:${GIT_BRANCH}
-                            """
-                        }
+                    withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
+                        sh "docker tag ${DOCKER_IMAGE} ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                        sh "docker tag ${DOCKER_IMAGE} ${DOCKER_USER}/${DOCKER_IMAGE}:latest"
+                        sh "docker push ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                        sh "docker push ${DOCKER_USER}/${DOCKER_IMAGE}:latest"
                     }
                 }
             }
         }
-    }
 
-    post {
-        always {
-            echo "Tetris V2 Pipeline Finished!"
+        stage("TRIVY Image Scan") {
+            steps {
+                sh "trivy image ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER} > trivyimage.txt"
+            }
+        }
+
+        stage('Checkout Code') {
+            steps {
+                git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
+            }
+        }
+
+        stage('Update Deployment file') {
+            steps {
+                dir("${MANIFEST_DIR}") {
+                    withCredentials([string(credentialsId: "${GITHUB_CRED_ID}", variable: 'GITHUB_TOKEN')]) {
+                        sh """
+                            git config user.email "jenkins@geemu.local"
+                            git config user.name "Jenkins CI"
+                            BUILD_NUMBER=${BUILD_NUMBER}
+                            echo \$BUILD_NUMBER
+                            
+                            sed -i "s|image: .*|image: ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}|" ${MANIFEST_FILE}
+                            git add ${MANIFEST_FILE}
+                            git commit -m "Update deployment Image to version ${BUILD_NUMBER}"
+                            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:${GIT_BRANCH}
+                        """
+                    }
+                }
+            }
         }
     }
 }
