@@ -1,0 +1,147 @@
+pipeline {
+    agent any
+
+    tools {
+        nodejs 'nodejs'
+    }
+
+    environment {
+        // [!] Credential IDs (ให้ตรงกับที่ตั้งไว้ใน Jenkins)
+        DOCKER_CRED_ID  = 'docker'
+        GITHUB_CRED_ID  = 'github'
+        SONAR_CRED_ID   = 'sonar-token'
+        NVD_API_KEY_ID  = 'nvd-api-key'
+
+        // ข้อมูล Docker Hub
+        DOCKER_HUB_USER = 'avian19'           
+        APP_NAME        = 'tetris-v2'
+        DOCKER_IMAGE    = "${DOCKER_HUB_USER}/${APP_NAME}"
+
+        // ข้อมูล GitHub
+        GIT_USER_NAME   = "tanatworks"        
+        GIT_REPO_NAME   = "Geemu"             
+        GIT_BRANCH      = "develop"
+        GIT_URL         = "https://github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git"
+
+        // ข้อมูล Kubernetes Manifest
+        MANIFEST_DIR    = 'k8s-manifests'
+        MANIFEST_FILE   = 'tetris-deployment.yaml'
+
+        SCANNER_HOME    = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('1. Cleaning & Checkout') {
+            steps {
+                cleanWs()
+                git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
+            }
+        }
+
+        stage('2. Sonarqube Analysis') {
+            steps {
+                dir('Tetris-V2') {
+                    script {
+                        withSonarQubeEnv('sonar-server') {
+                            sh "${SCANNER_HOME}/bin/sonar-scanner \
+                                -Dsonar.projectName='Tetris V2' \
+                                -Dsonar.projectKey='Tetris-V2'"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('3. Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    // ปรับเป็น abortPipeline: false หากต้องการให้รันต่อแม้ไม่ผ่าน (เหมือน V1)
+                    waitForQualityGate abortPipeline: true, credentialsId: "${SONAR_CRED_ID}"
+                }
+            }
+        }
+
+        stage('4. Installing Dependencies') {
+            steps {
+                dir('Tetris-V2') {
+                    sh 'npm install'
+                }
+            }
+        }
+
+        stage('5. Security Scans') {
+            parallel {
+                stage('Dependency Check') {
+                    steps {
+                        dir('Tetris-V2') {
+                            // เพิ่มการใช้ NVD API Key เหมือนใน V1 เพื่อให้การสแกนรวดเร็วและแม่นยำขึ้น
+                            withCredentials([string(credentialsId: "${NVD_API_KEY_ID}", variable: 'NVD_API_KEY')]) {
+                                dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey ${NVD_API_KEY}", odcInstallation: 'DP-Check'
+                            }
+                            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                        }
+                    }
+                }
+                stage('Trivy File Scan') {
+                    steps {
+                        dir('Tetris-V2') {
+                            sh 'trivy fs . > trivyfs.txt'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('6. Docker Build & Scan') {
+            steps {
+                script {
+                    dir('Tetris-V2') {
+                        withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
+                            // Clean space ก่อน Build เหมือน V1
+                            sh 'docker system prune -f'
+
+                            sh "docker build -t ${APP_NAME} ."
+
+                            // Scan Image
+                            sh "trivy image ${APP_NAME} > trivyimage.txt"
+
+                            // Tag & Push
+                            sh "docker tag ${APP_NAME} ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                            sh "docker tag ${APP_NAME} ${DOCKER_IMAGE}:latest"
+                            sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                            sh "docker push ${DOCKER_IMAGE}:latest"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('7. GitOps: Update Manifest') {
+            steps {
+                script {
+                    dir("${MANIFEST_DIR}") {
+                        withCredentials([string(credentialsId: "${GITHUB_CRED_ID}", variable: 'GITHUB_TOKEN')]) {
+                            sh """
+                                git config user.email "jenkins@geemu.com"
+                                git config user.name "Jenkins-Bot"
+
+                                # ปรับ sed ให้หาคำว่า image: แล้วเปลี่ยนค่าทั้งหมดเพื่อให้ยืดหยุ่นต่อการเปลี่ยนชื่อ image
+                                sed -i "s|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" ${MANIFEST_FILE}
+
+                                git add ${MANIFEST_FILE}
+                                git commit -m "chore: update Tetris V2 image to version ${BUILD_NUMBER} [skip ci]"
+                                git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git HEAD:${GIT_BRANCH}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Tetris V2 Pipeline Finished!"
+        }
+    }
+}
