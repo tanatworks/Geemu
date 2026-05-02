@@ -1,0 +1,49 @@
+pipeline {
+    agent any
+    
+    // ตั้งค่าตัวแปรหลัก (แก้ตรงนี้ให้ตรงกับทีมของเรา)
+    environment {
+        DOCKER_CRED_ID = 'docker-cred'
+        DOCKER_IMAGE   = 'ชื่อ-dockerhub-คุณ/kote-app' // ใส่ชื่อแอปของเราลงไป
+        GIT_URL        = 'https://github.com/tanatworks/Geemu.git'
+        APP_DIR        = 'application/frontend'       // โฟลเดอร์ที่เก็บโค้ดและ Dockerfile
+    }
+
+    stages {
+        stage('1. Checkout Code') {
+            steps {
+                cleanWs() // ล้างไฟล์เก่าทิ้งก่อน
+                git branch: 'main', url: "${GIT_URL}"
+            }
+        }
+
+        stage('2. Security Scans (Coming Soon)') {
+            steps {
+                // ทิ้งเป็น Placeholder ไว้ก่อน เอาไว้ให้รู้ว่าอนาคตเราจะเอา SonarQube/Trivy มาใส่ตรงนี้
+                echo 'Skipping SonarQube and Trivy scan for the initial setup...'
+            }
+        }
+
+        stage('3. Build Docker Image') {
+            steps {
+                dir("${APP_DIR}") {
+                    // ล้าง Image เก่าๆ ในเครื่องเซิร์ฟเวอร์ทิ้งเพื่อประหยัดพื้นที่
+                    sh 'docker system prune -f'
+                    // สั่ง Build
+                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+                }
+            }
+        }
+
+        stage('4. Push to Docker Hub') {
+            steps {
+                dir("${APP_DIR}") {
+                    // เรียกใช้กุญแจ Docker Hub จาก Jenkins
+                    withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
+                        sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                    }
+                }
+            }
+        }
+    }
+}
