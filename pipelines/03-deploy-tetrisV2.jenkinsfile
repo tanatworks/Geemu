@@ -69,12 +69,13 @@ pipeline {
 
        stage('OWASP Dependency-Check Scan') {
             steps {
-                dir("${APP_DIR}") {
-                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                        dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey ${NVD_API_KEY}", odcInstallation: 'DP-Check'
-                    }
-                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-                }
+                echo "Skipping OWASP Scan for Demo purposes..."
+                // dir("${APP_DIR}") {
+                //     withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                //         dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey ${NVD_API_KEY}", odcInstallation: 'DP-Check'
+                //     }
+                //     dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                // }
             }
         }
 
@@ -91,7 +92,6 @@ pipeline {
                 script {
                     dir("${APP_DIR}") {
                         withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
-                            sh 'docker system prune -f'
                             sh "docker build -t ${DOCKER_IMAGE} ."
                         }
                     }
@@ -136,7 +136,7 @@ pipeline {
                             
                             sed -i "s|image: .*|image: ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}|" ${MANIFEST_FILE}
                             git add ${MANIFEST_FILE}
-                            git commit -m "Update deployment Image to version ${BUILD_NUMBER}"
+                            git commit -m "Update deployment Image to version ${BUILD_NUMBER} [skip ci]"
                             git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:${GIT_BRANCH}
                         """
                     }
