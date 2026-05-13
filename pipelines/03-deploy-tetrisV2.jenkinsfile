@@ -20,7 +20,6 @@ pipeline {
         MANIFEST_FILE   = 'tetris-deployment.yaml'
         
         SCANNER_HOME    = tool 'sonar-scanner' 
-        SKIP_REMAINING_STAGES = 'false'
     }
     
 
@@ -41,25 +40,7 @@ pipeline {
             }
         }
 
-        stage('Check for Skip CI') {
-            steps {
-                script {
-                    def commitMessage = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
-                    echo "Commit message is: ${commitMessage}"
-
-                    if (commitMessage.contains("[skip ci]")) {
-                        echo "--- Found [skip ci], marking to skip remaining stages ---"
-                        env.SKIP_REMAINING_STAGES = 'true'
-                        currentBuild.result = 'SUCCESS'
-                    } else {
-                        echo "No [skip ci] found. Let's continue!"
-                    }
-                }
-            }
-        }
-
         stage('Sonarqube Analysis') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 dir("${APP_DIR}") {
                     withSonarQubeEnv('sonar-server') {
@@ -71,7 +52,6 @@ pipeline {
         }
 
         stage('Quality Check') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 script {
                     waitForQualityGate abortPipeline: false, credentialsId: "${SONAR_CRED_ID}"
@@ -80,7 +60,6 @@ pipeline {
         }
 
         stage('Installing Dependencies') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 dir("${APP_DIR}") {
                     sh 'npm install'
@@ -89,7 +68,6 @@ pipeline {
         }
 
        stage('OWASP Dependency-Check Scan') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 echo "Skipping OWASP Scan for Demo purposes..."
                 // dir("${APP_DIR}") {
@@ -102,7 +80,6 @@ pipeline {
         }
 
         stage('Trivy File Scan') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 dir("${APP_DIR}") {
                     sh 'trivy fs . > trivyfs.txt'
@@ -111,7 +88,6 @@ pipeline {
         }
 
         stage("Docker Image Build") {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 script {
                     dir("${APP_DIR}") {
@@ -124,7 +100,6 @@ pipeline {
         }
 
         stage("Docker Image Pushing") {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 script {
                     withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
@@ -138,21 +113,18 @@ pipeline {
         }
 
         stage("TRIVY Image Scan") {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 sh "trivy image ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER} > trivyimage.txt"
             }
         }
 
         stage('Checkout Code') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
             }
         }
 
         stage('Update Deployment file') {
-            when { expression { env.SKIP_REMAINING_STAGES == 'false' } }
             steps {
                 dir("${MANIFEST_DIR}") {
                     withCredentials([string(credentialsId: "${GITHUB_CRED_ID}", variable: 'GITHUB_TOKEN')]) {
