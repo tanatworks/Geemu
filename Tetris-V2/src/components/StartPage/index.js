@@ -5,7 +5,7 @@ const StyledStartPage = styled.div`
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    background-color: #3bf984;
+    background-color: #1a16fa;
 `;
 
 const StartButton = styled.button`
@@ -73,7 +73,7 @@ const StartButton = styled.button`
 const StartPage = ({ startClick }) => {
     return (
         <StyledStartPage>
-            <StartButton onClick={startClick}>Start Game V3</StartButton>
+            <StartButton onClick={startClick}>Start Game NON</StartButton>
         </StyledStartPage>
     );
 };
