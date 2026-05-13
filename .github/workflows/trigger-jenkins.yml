@@ -3,6 +3,8 @@ name: Trigger Jenkins Build
 on:
     push:
         branches: [develop]
+        paths:
+            - "Tetris-V2/**"
 
 jobs:
     trigger-jenkins:

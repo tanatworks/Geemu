@@ -48,7 +48,7 @@ pipeline {
             }
         }
         
-        stage('4. Install ArgoCD (Step 6)') {
+        stage('4. Install ArgoCD') {
             when { 
                 expression { params.ACTION == 'apply' } 
             }
