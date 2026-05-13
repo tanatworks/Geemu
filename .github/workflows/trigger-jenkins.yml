@@ -1,0 +1,20 @@
+name: Trigger Jenkins Build
+
+on:
+    push:
+        branches: [develop]
+
+jobs:
+    trigger-jenkins:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v3
+
+            - name: Trigger Jenkins
+              run: |
+                  curl -X POST \
+                    "${{ secrets.JENKINS_URL }}/job/Tetris-V2-Deployment/build?token=${{ secrets.JENKINS_JOB_TOKEN }}" \
+                    --user "${{ secrets.JENKINS_TOKEN }}" \
+                    --max-time 10 \
+                    -w "\nHTTP Status: %{http_code}\n"

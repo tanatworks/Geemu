@@ -6,31 +6,72 @@ pipeline {
     }
     
     environment {
-        AWS_CRED_ID = 'aws-key'            
-        TF_DIR      = 'infrastructure/jenkins-ec2' 
-        GIT_URL     = 'https://github.com/tanatworks/Geemu.git'
+        AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+        AWS_SESSION_TOKEN     = credentials('aws-session-token')
+        
+        TF_DIR  = 'infrastructure/eks-cluster' 
+        GIT_URL = 'https://github.com/tanatworks/Geemu.git'
     }
 
     stages {
         stage('1. Checkout Code') {
             steps {
-                git branch: 'main', url: "${GIT_URL}"
+                git branch: 'develop', url: "${GIT_URL}"
             }
         }
         
         stage('2. Execute Terraform') {
             steps {
-                withAWS(credentials: "${AWS_CRED_ID}", region: 'us-east-1') {
-                    dir("${TF_DIR}") {
-                        script {
-                            sh 'terraform init'
-                            if (params.ACTION == 'plan') {
-                                sh 'terraform plan'
-                            } else {
-                                sh "terraform ${params.ACTION} -auto-approve"
-                            }
+                dir("${TF_DIR}") {
+                    script {
+                        sh 'terraform init'
+                        if (params.ACTION == 'plan') {
+                            sh 'terraform plan'
+                        } else {
+                            sh "terraform ${params.ACTION} -auto-approve"
                         }
                     }
+                }
+            }
+        }
+
+        stage('3. Configure Kubeconfig') {
+            when { 
+                expression { params.ACTION == 'apply' } 
+            }
+            steps {
+                script {
+                    sh "aws eks update-kubeconfig --region us-east-1 --name Geemu-EKS-Cluster"
+                    sh "kubectl get nodes"
+                }
+            }
+        }
+        
+        stage('4. Install ArgoCD (Step 6)') {
+            when { 
+                expression { params.ACTION == 'apply' } 
+            }
+            steps {
+                script {
+                    sh "kubectl create namespace tetris || true"
+                    sh "kubectl create namespace argocd || true"
+                    
+                    sh "kubectl delete svc argocd-server -n argocd --ignore-not-found=true"
+                    
+                    sh "kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.4.7/manifests/install.yaml"
+                    sh "kubectl patch svc argocd-server -n argocd -p '{\"spec\": {\"type\": \"LoadBalancer\"}}'"
+             
+                    sh "kubectl rollout restart deployment -n argocd"
+                    sh "kubectl rollout restart statefulset -n argocd"
+
+                    sleep time: 45, unit: 'SECONDS'
+                    
+                    sh "echo '=== ARGOCD URL ==='"
+                    sh "kubectl get svc argocd-server -n argocd -o wide"
+                    
+                    sh "echo '=== ARGOCD PASSWORD ==='"
+                    sh "kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d && echo"
                 }
             }
         }

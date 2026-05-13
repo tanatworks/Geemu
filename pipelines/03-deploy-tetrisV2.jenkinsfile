@@ -1,0 +1,147 @@
+pipeline {
+    agent any
+    
+    environment {
+        // ส่วนนี้คือค่าของโปรเจกต์สำหรับ V2
+        DOCKER_CRED_ID  = 'docker'             
+        GITHUB_CRED_ID  = 'github'             
+        SONAR_CRED_ID   = 'sonar-token'        
+        
+        DOCKER_USER     = 'tanattanat'         
+        DOCKER_IMAGE    = 'tetris-v2'          
+        
+        GIT_URL         = 'https://github.com/tanatworks/Geemu.git'
+        GIT_BRANCH      = 'develop'
+        GIT_REPO_NAME   = 'Geemu'
+        GIT_USER_NAME   = 'tanatworks'
+        
+        APP_DIR         = 'Tetris-V2'         
+        MANIFEST_DIR    = 'k8s-manifests' 
+        MANIFEST_FILE   = 'tetris-deployment.yaml'
+        
+        SCANNER_HOME    = tool 'sonar-scanner' 
+    }
+    
+
+    tools {
+        nodejs 'nodejs' 
+    }
+
+    stages {
+        stage('Cleaning Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
+            }
+        }
+
+        stage('Sonarqube Analysis') {
+            steps {
+                dir("${APP_DIR}") {
+                    withSonarQubeEnv('sonar-server') {
+                        sh """ $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Tetris-V2 \
+                        -Dsonar.projectKey=Tetris-V2 """
+                    }
+                }
+            }
+        }
+
+        stage('Quality Check') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: "${SONAR_CRED_ID}"
+                }
+            }
+        }
+
+        stage('Installing Dependencies') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'npm install'
+                }
+            }
+        }
+
+       stage('OWASP Dependency-Check Scan') {
+            steps {
+                echo "Skipping OWASP Scan for Demo purposes..."
+                // dir("${APP_DIR}") {
+                //     withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                //         dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey ${NVD_API_KEY}", odcInstallation: 'DP-Check'
+                //     }
+                //     dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                // }
+            }
+        }
+
+        stage('Trivy File Scan') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'trivy fs . > trivyfs.txt'
+                }
+            }
+        }
+
+        stage("Docker Image Build") {
+            steps {
+                script {
+                    dir("${APP_DIR}") {
+                        withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
+                            sh "docker build -t ${DOCKER_IMAGE} ."
+                        }
+                    }
+                }
+            }
+        }
+
+        stage("Docker Image Pushing") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: "${DOCKER_CRED_ID}", toolName: 'docker') {
+                        sh "docker tag ${DOCKER_IMAGE} ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                        sh "docker tag ${DOCKER_IMAGE} ${DOCKER_USER}/${DOCKER_IMAGE}:latest"
+                        sh "docker push ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                        sh "docker push ${DOCKER_USER}/${DOCKER_IMAGE}:latest"
+                    }
+                }
+            }
+        }
+
+        stage("TRIVY Image Scan") {
+            steps {
+                sh "trivy image ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER} > trivyimage.txt"
+            }
+        }
+
+        stage('Checkout Code') {
+            steps {
+                git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
+            }
+        }
+
+        stage('Update Deployment file') {
+            steps {
+                dir("${MANIFEST_DIR}") {
+                    withCredentials([string(credentialsId: "${GITHUB_CRED_ID}", variable: 'GITHUB_TOKEN')]) {
+                        sh """
+                            git config user.email "jenkins@geemu.local"
+                            git config user.name "Jenkins CI"
+                            BUILD_NUMBER=${BUILD_NUMBER}
+                            echo \$BUILD_NUMBER
+                            
+                            sed -i "s|image: .*|image: ${DOCKER_USER}/${DOCKER_IMAGE}:${BUILD_NUMBER}|" ${MANIFEST_FILE}
+                            git add ${MANIFEST_FILE}
+                            git commit -m "Update deployment Image to version ${BUILD_NUMBER} [skip ci]"
+                            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:${GIT_BRANCH}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
